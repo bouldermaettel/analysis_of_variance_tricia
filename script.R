@@ -18,17 +18,28 @@ library(dplyr)
 library(tidyverse)
 
 numeric_cols <- c("S", "D", "P")
-col_types <- rep("default", ncol(readxl::read_excel("example.xlsx", sheet = "Sheet1")))
-col_types[names(col_types) %in% numeric_cols] <- "numeric"
-data_tot <- read_excel("Varianzanalyse_v3_RESULTS.xlsx", 1)
+mapping <- list(
+  "S" = c('hard_severity', 'hard_severity_new'),
+  "D" = c('hard_detectable', 'hard_detectable_new'),
+  "S" = c('hard_probability', 'hard_probability_new'))
 
-data_tot <- data_tot %>% mutate(k = ifelse(is.na(as.numeric(k)), NA, as.numeric(k)))
+column_names <- colnames(read_excel("Varianzanalyse_v3_RESULTS.xlsx", 1))
+
+col_types <- rep("guess", length(column_names))
+col_types[column_names %in% numeric_cols] <- "numeric"
+data_tot <- read_excel("Varianzanalyse_v3_RESULTS.xlsx", 1, col_types = col_types)
+col_types_tricia <- rep('numeric', 9)
+tricia_data <- read_excel('tricia_data.xlsx', 1, col_types = col_types_tricia)
+head(tricia_data)
+str(tricia_data)
+
+data_tot$Testperson <- factor(data_tot$Testperson)
 head(data_tot)
 str(data_tot)
 
 
 # define replicates as factor
-data_tot$Testperson <- factor(data_tot$Testperson)
+
 
 
 # define alpha's for prediction and for the confidence interval of the mean difference
@@ -38,7 +49,7 @@ alpha_conf  <- 0.1
 # number of future n number of within series differencies
 n_test <- 5
 
-tasks = c("S", "D", "P")
+tasks <- c("S", "D", "P")
 
 # Estimation of standard deviation using bootstrap
 
@@ -86,7 +97,7 @@ for (k in unique(tasks)) {
     mean_diff <- NA
     diff_numb <- NA
     set.seed(123)
-    for (z in 1:1e4){
+    for (z in 1:1e2){
       sign <- rbinom(length(abs_diff),1,0.5)*2-1 # binomial distribution with 50% 0 and 50% 1: factor 2 and plus 1 to transform to -1 and 1
       sign_diff <-sign*abs_diff
       sd_diff[z] <- sd(sign_diff)
@@ -100,13 +111,6 @@ for (k in unique(tasks)) {
       }
     }
     
-
-    # qqnorm(diff_numb)
-    # qqline(diff_numb)
-    # 
-    # qqnorm(mean_diff)
-    # qqline(mean_diff)
-    
     sd(diff_numb)
 
     # calculate sd based on mean_diff and multipy with sqrt(n)
@@ -116,18 +120,55 @@ for (k in unique(tasks)) {
     # qqnorm(sd_diff)
     sd_diff_boot
     mean_diff_boot <- mean(mean_diff)
+    
     # qqnorm(mean_diff)
     sd(mean_diff)
     mean_diff_boot # must be close to zero!
     
     
-    #######################################################################################
-    # The within standard deviation approach! do not forget to define Testperson as factor!   #
-    #######################################################################################
-    data_tot <- data_tot %>% mutate(k = ifelse(is.na(as.numeric(k)), NA, k))
-    data_tot[k] = as.numeric(data_tot[k])
+    ## do the sampling in tricia_data
+    sd_diff_tricia <- NA
+    mean_diff_tricia <- NA
+    diff_numb_tricia <- NA
+    set.seed(123)
+    for (z in 1:1e2){
+      tricia_sample <- tricia_data[sample(nrow(tricia_data), length(abs_diff)), ]
+      cols = mapping[k]
+      sign_diff <- tricia_data[cols[1]] - tricia_data[cols[2]]
+      sd_diff_tricia[z] <- sd(sign_diff)
+      mean_diff_tricia[z] <- mean(sign_diff)
+      
+      if (z == 1) {
+        
+        diff_numb_tricia <- sign_diff
+      } else {
+        diff_numb_tricia <- append(diff_numb_tricia, sign_diff_tricia)
+      }
+    }
     
-    summary(fit <- lm (as.numeric(k) ~  as.factor(Testperson), data = data_tot))
+    sd(diff_numb_tricia)
+    
+    # calculate sd based on mean_diff and multipy with sqrt(n)
+    sd_diff_boot_tricia <- sd(mean_diff_tricia)*sqrt(length(abs_diff))
+    
+    sd_diff_boot2_tricia <- mean(mean_diff_tricia)
+    # qqnorm(sd_diff)
+    sd_diff_boot_tricia
+    mean_diff_boot_tricia <- mean(mean_diff_tricia)
+    
+    # qqnorm(mean_diff)
+    sd(mean_diff_tricia)
+    mean_diff_boot_tricia # must be close to zero!
+    
+    
+    
+    ############################################################################################
+    # The within standard deviation approach! do not forget to define Testperson as factor!   #
+    ###########################################################################################
+    
+    data_anova <- data_tot[!is.na(data_tot[[k]]), ]
+    
+    summary(fit <- lm (data_anvoa[[k]] ~ Testperson, data = data_anova))
     anova(fit)
    
     sd_within <- sqrt(anova(fit)["Residuals", "Mean Sq"])
@@ -243,16 +284,3 @@ for (k in unique(tasks)) {
   }
     
 }
-
-
-##### Testing
-
-# Define a vector of numbers
-numbers <- c(1, 2, 4, 3)
-
-# Get all combinations of differences
-all_combinations <- combn(numbers, 2, function(x) diff(x))
-
-# Print the result
-print(all_combinations)
-
