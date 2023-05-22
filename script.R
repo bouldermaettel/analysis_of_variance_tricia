@@ -38,10 +38,6 @@ head(data_tot)
 str(data_tot)
 
 
-# define replicates as factor
-
-
-
 # define alpha's for prediction and for the confidence interval of the mean difference
 alpha_pred <- 0.05 
 alpha_conf  <- 0.1
@@ -96,12 +92,15 @@ for (k in unique(tasks)) {
     sd_diff <- NA
     mean_diff <- NA
     diff_numb <- NA
+    CIs2 <- data.frame(NA,NA)
     set.seed(123)
     for (z in 1:1e2){
       sign <- rbinom(length(abs_diff),1,0.5)*2-1 # binomial distribution with 50% 0 and 50% 1: factor 2 and plus 1 to transform to -1 and 1
       sign_diff <-sign*abs_diff
       sd_diff[z] <- sd(sign_diff)
       mean_diff[z] <- mean(sign_diff)
+      CIs2[z,] <- c(t.test(sign_diff, conf_level = 0.9, var.equal = TRUE)$conf.int[1], t.test(sign_diff, conf_level = 0.9, var.equal = TRUE)$conf.int[2])
+      
        
       if (z == 1) {
         
@@ -112,6 +111,9 @@ for (k in unique(tasks)) {
     }
     
     sd(diff_numb)
+    
+    CIlower2 <- mean(CIs2[,1])
+    CIupper2 <- mean(CIs2[,2])
 
     # calculate sd based on mean_diff and multipy with sqrt(n)
     sd_diff_boot <- sd(mean_diff)*sqrt(length(abs_diff))
@@ -124,29 +126,88 @@ for (k in unique(tasks)) {
     # qqnorm(mean_diff)
     sd(mean_diff)
     mean_diff_boot # must be close to zero!
-    
+
     
     ## do the sampling in tricia_data
     sd_diff_tricia <- NA
     mean_diff_tricia <- NA
     diff_numb_tricia <- NA
+    CIs_tricia <- data.frame(NA, NA)
+    CIs2_tricia <- data.frame(NA, NA)
+    cols <- mapping[k][[1]]
     set.seed(123)
     for (z in 1:1e2){
-      tricia_sample <- tricia_data[sample(nrow(tricia_data), length(abs_diff)), ]
-      cols = mapping[k]
-      sign_diff <- tricia_data[cols[1]] - tricia_data[cols[2]]
+      tricia_sample_selection <- tricia_data[tricia_data[cols[2]] != 0, ]
+      tricia_sample <- tricia_sample_selection[sample(nrow(tricia_sample_selection), length(abs_diff)), ]
+      sign_diff_df <- tricia_sample[cols[1]] - tricia_sample[cols[2]]
+      sign_diff <- sign_diff_df %>% pull(cols[1]) %>% as.numeric()
       sd_diff_tricia[z] <- sd(sign_diff)
       mean_diff_tricia[z] <- mean(sign_diff)
+      # CIs_tricia[z,] <- mean(sign_diff) + qt(c(alpha_conf/2,1-alpha_conf/2),length(sign_diff)-1)*sd_diff_tricia[z]/sqrt(length(sign_diff))
+      CIs2_tricia[z,] <- c(t.test(sign_diff, conf_level = 0.9, var.equal = TRUE)$conf.int[1], t.test(sign_diff, conf_level = 0.9, var.equal = TRUE)$conf.int[2])
+      
+      
       
       if (z == 1) {
         
         diff_numb_tricia <- sign_diff
       } else {
-        diff_numb_tricia <- append(diff_numb_tricia, sign_diff_tricia)
+        diff_numb_tricia <- append(diff_numb_tricia, sign_diff)
       }
     }
     
+    # CIlower_tricia <- mean(CIs_tricia[,1])
+    # CIupper_tricia <- mean(CIs_tricia[,2])
+    
+    CIlower2_tricia <- mean(CIs2_tricia[,1])
+    CIupper2_tricia  <- mean(CIs2_tricia[,2])
+    
     sd(diff_numb_tricia)
+    
+    # Estimate density
+    df_sme <- data.frame(results = diff_numb)
+    df_tricia <- data.frame(results = diff_numb_tricia)
+    df_sme$group <- "SME"
+    df_tricia$group <- "TRICIA"
+    
+    df <- rbind(df_sme, df_tricia)
+    
+    ggplot(df, aes(x = results, fill = group)) +
+      geom_histogram(position = "dodge", alpha = 0.5, bins = 10) +
+      labs(title = "Histogram", x = "Values", y = "Frequency") +
+      scale_fill_manual(values = c("blue", "red"))
+    
+    # Create density plot
+    p <- ggplot(df, aes(x = results, fill = group)) +
+      geom_density(alpha = 0.8, color = "black") +
+      labs(title = paste0("Density Plot ", cols[1]), x = "Values", y = "Density") +
+      scale_fill_manual(values = c("blue", "red")) + 
+      scale_x_continuous(breaks = sort(unique(diff_numb_tricia))) +
+      geom_vline(xintercept = CIlower2, color = "blue", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIupper2, color = "blue", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIlower2_tricia, color = "red", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIupper2_tricia, color = "red", linetype = "dashed", linewidth = 1.5)
+      
+    png(paste0("./plots/density_plot_", cols[1], ".png"))
+    print(p)
+    dev.off()
+    # Save the density plot as a PNG file
+    # ggsave(paste0("density_plot", cols[1], ".png"), plot = last_plot())
+    
+  # Create density plot
+    max_CI <- ceiling(max(abs(CIlower2), abs(CIlower2_tricia), abs(CIupper2), abs(CIupper2_tricia))) 
+      
+    ggplot(df, aes(x = results, fill = group)) +
+      geom_density(alpha = 0.4, color = "black") + 
+      labs(title = paste0("Density Plot ", cols[1]), x = "Values", y = "Density") +
+      scale_fill_manual(values = c("blue", "red")) + 
+      xlim(-max_CI, max_CI) +
+      geom_vline(xintercept = CIlower2, color = "blue", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIupper2, color = "blue", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIlower2_tricia, color = "red", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIupper2_tricia, color = "red", linetype = "dashed", linewidth = 1.5)
+    
+    ggsave(paste0("./plots/CI_plot", cols[1], ".png"), device = "png", plot = last_plot(), dpi = 300)
     
     # calculate sd based on mean_diff and multipy with sqrt(n)
     sd_diff_boot_tricia <- sd(mean_diff_tricia)*sqrt(length(abs_diff))
@@ -162,125 +223,25 @@ for (k in unique(tasks)) {
     
     
     
-    ############################################################################################
-    # The within standard deviation approach! do not forget to define Testperson as factor!   #
-    ###########################################################################################
-    
-    data_anova <- data_tot[!is.na(data_tot[[k]]), ]
-    
-    summary(fit <- lm (data_anvoa[[k]] ~ Testperson, data = data_anova))
-    anova(fit)
-   
-    sd_within <- sqrt(anova(fit)["Residuals", "Mean Sq"])
-    sd_within*sqrt(2) # is close to sd
-    
-    # simulate data sets to calculate differencies
-    set.seed(123)
-    diffs <- rnorm(1e5,0,sd_within)-rnorm(1e5,0,sd_within)
-    mean_diff <- mean(diffs)
-    sd <- sd(diffs)  # is equivalent to the sd_within*sqrt(2)
-    
-    qqnorm(diffs)
-    qqline(diffs)
-    
-    #######################################################################################
-    # The "exact non-parametric approach"                                                 #
-    #######################################################################################
-    
-    # define combinations
-    comb4 <- expand.grid(x1 = c(1,-1), x2 = c(1,-1), x3 = c(1,-1), x4 = c(1,-1))
-    comb5 <- expand.grid(x1 = c(1,-1), x2 = c(1,-1), x3 = c(1,-1), x4 = c(1,-1), x5 = c(1,-1))
-    comb6 <- expand.grid (x1 = c(1,-1), x2 = c(1,-1), x3 = c(1,-1), x4 = c(1,-1), x5 = c(1,-1), x6 = c(1,-1))
-    
-    combs <- list(comb4,comb5, comb6)
-    df <- data.frame(NA,NA,NA, NA, NA, NA)
-    df <- df[,1:length(abs_diff)]
-    CIs <- data.frame(NA,NA) # used for consistency check!
-    CIs2 <- data.frame(NA,NA) # used for consistency check!
-    
-    for (l in 1: nrow(combs[[length(abs_diff)-3]])) {
-      df[l,] <-  abs_diff*combs[[length(abs_diff)-3]][l,]
-      CIs[l,] <- mean(as.numeric(df[l,])) + qt(c(alpha_conf/2,1-alpha_conf/2),length(abs_diff)-1)*sd(df[l,])/sqrt(length(abs_diff))
-      CIs2[l,] <- c(t.test(as.numeric(df[l,]), conf_level = 0.9)$conf.int[1],t.test(as.numeric(df[l,]))$conf.int[2])
-
-    }
-      
-    CIlower <- quantile(CIs[,1],p = 0.025)*sqrt(6)/sqrt(3)
-    CIupper <- quantile(CIs[,2],p = 0.975)
-    
-    # calculate means, sd of means and sd of values
-      means <- apply(df,1,mean )
-      sd_means <- sd(means)
-      sd_permut <- sd_means*sqrt(length(abs_diff))
-      
-      qqnorm(means)
-      qqline(means)
-      
-      #calculate min max CI boundaries (too see if the worst case CI is in the AC)
-      CImin <- min(CIs[,2])*2
-      CImax <- max(CIs[,2])*2
-      
-      CIlower_avg <- mean(CIs[,1])
-      CIupper_avg <- mean(CIs[,2])
-      
-      CIlower2_avg <- mean(CIs2[,1])
-      CIupper2_avg <- mean(CIs2[,2])
-      
-      # calculate (1-alpha_conf)-confidence interval for the mean difference of the future measures (n.test)
-      CI <- qt(c(alpha_conf/2,1-alpha_conf/2),n_test-1)*sd/sqrt(n_test)
-      CIupper <- CI[2]
-      CIlower <- CI[1]
-      
-      # calculate (1-alpha_pred)-predicion intervals from original samples
-      pred <-  sqrt(1/length(abs_diff) + 1/n_test)*sd*qt(c(alpha_pred/2,1-alpha_pred/2),length(abs_diff)-1)
-      
-      # # calculation acc_ to pharmacopoe and according to A149 (not PI for mean but for single value)
-      # pred_pharm <-  sqrt(1/length(abs_diff) + 1)*sd_diff_boot*qt(c(0.05,0.95),length(abs_diff)-1) # is used as AC, so compare it to the AC
-      
-      # calculate AC (PI + each side 1/2 (1-alpha_conf)-%-CI length)
-      AC   <- pred + CI
-      ACupper <- AC[2]
-      AClower <- AC[1]
-      AC
-      
-    
-    setwd("/plots")
-    
-    png(filename=paste("Equivalence Limits_", i, k, ".png" ,sep = ""), 
-        type="cairo",
-        units="in", 
-        width=6, 
-        height=10, 
-        pointsize=12, 
-        res=200)
-    
-    a <- (AC[2]-AC[1])/10
-    #Equivalence limit calculation
-    plot(c(AC[1]-a,AC[2]+a),  type = "n",axes = F, xlim = c(2,18), 
-         main = paste("Equivalence Limits for", i, "and" , k, sep = " "), ylab = data.sample$Units[1])
-    axis(2, labels = c(round(AC[1],3),round(mean(pred),0),round(AC[2],3)), 
-         at = c(AC[1],0,AC[2]))
-    box()
-    
-    abline(AC[1],0, col = "red", lwd = 2)
-    abline(AC[2],0, col = "red", lwd = 2)
-    abline(0,0, col = "red", lwd = 2, lty = "dashed")
-    
-    # segments(8,CImin,12,CImin, lwd = 2, col = "blue")
-    # segments(8,CImax,12,CImax, lwd = 2, col = "blue")
-    # segments(10,CImin,10,CImax, lwd = 2)
+    # ############################################################################################
+    # # The within standard deviation approach! do not forget to define Testperson as factor!   #
+    # ###########################################################################################
     # 
-    # segments(8,CIlower.avg,12,CIlower.avg, lwd = 2)
-    # segments(8,CIupper.avg,12,CIupper.avg, lwd = 2)
+    # data_anova <- data_tot[!is.na(data_tot[[k]]), ]
     # 
-    text (x = 5, y = AC[2]-a, labels = c("Upper acceptance limit"), col = "red")
-    text (x = 5, y = AC[1]+a, labels = c("Lower acceptance limit"), col = "red")
-    
-    legend("topright", legend =c(paste("sd bootstrap approach     =" , round(sd_diff.boot, 3)), 
-                                 paste("sd within approach            =", round(sd, 3)),
-                                 paste("sd permutation approach =", round(sd.permut,3))))
-    
-    dev.off()
-  }
+    # summary(fit <- lm (data_anvoa[[k]] ~ Testperson, data = data_anova))
+    # anova(fit)
+    # 
+    # sd_within <- sqrt(anova(fit)["Residuals", "Mean Sq"])
+    # sd_within*sqrt(2) # is close to sd
+    # 
+    # # simulate data sets to calculate differencies
+    # set.seed(123)
+    # diffs <- rnorm(1e5,0,sd_within)-rnorm(1e5,0,sd_within)
+    # mean_diff <- mean(diffs)
+    # sd <- sd(diffs)  # is equivalent to the sd_within*sqrt(2)
+    # 
+    # qqnorm(diffs)
+    # qqline(diffs)
     
 }
