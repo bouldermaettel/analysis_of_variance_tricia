@@ -17,17 +17,25 @@ library(readxl)
 library(dplyr)
 library(tidyverse)
 
-numeric_cols <- c("S", "D", "P")
+numeric_cols <- c("S", "D", "P", "RBC")
 mapping <- list(
   "S" = c('hard_severity', 'hard_severity_new'),
   "D" = c('hard_detectable', 'hard_detectable_new'),
-  "S" = c('hard_probability', 'hard_probability_new'))
+  "P" = c('hard_probability', 'hard_probability_new'),
+  "RBC" = c('old_hard_rat', "new_hard_rat"))
 
-column_names <- colnames(read_excel("Varianzanalyse_v3_RESULTS.xlsx", 1))
+column_names <- colnames(read_excel("Varianzanalyse_v4_RESULTS.xlsx", 1))
 
 col_types <- rep("guess", length(column_names))
 col_types[column_names %in% numeric_cols] <- "numeric"
-data_tot <- read_excel("Varianzanalyse_v3_RESULTS.xlsx", 1, col_types = col_types)
+data_tot <- read_excel("Varianzanalyse_v4_RESULTS.xlsx", 1, col_types = col_types)
+
+# remove case with no rat
+data_tot <- data_tot[complete.cases(data_tot[, "S"]), ]
+
+# # ausschluss wenn VK_NR 65106 ist (kein RAT)
+# data_tot <- data_tot[data_tot$VK_ID != 65106,]
+
 col_types_tricia <- rep('numeric', 9)
 tricia_data <- read_excel('tricia_data.xlsx', 1, col_types = col_types_tricia)
 head(tricia_data)
@@ -38,20 +46,21 @@ head(data_tot)
 str(data_tot)
 
 
-# define alpha's for prediction and for the confidence interval of the mean difference
-alpha_pred <- 0.05 
+# define alpha's for pblackiction and for the confidence interval of the mean difference
+alpha_pblack <- 0.05 
 alpha_conf  <- 0.1
 
 # number of future n number of within series differencies
 n_test <- 5
 
-tasks <- c("S", "D", "P")
+tasks <- c("S", "D", "P", "RBC")
 
 # Estimation of standard deviation using bootstrap
 
 ## To test the script
 # i <- 63793
-# k <- "S"
+k <- "RBC"
+# k <- "D"
 
 for (k in unique(tasks)) {
   
@@ -63,9 +72,11 @@ for (k in unique(tasks)) {
     id <- na.omit(data_tot[data_tot$VK_ID == i, ])
     
     case <- id %>% pull(k) %>% as.numeric()
+    vk_nr <- (id %>% pull('VK_ID') %>% as.numeric())[1]
 
     # Get all combinations of differences
     diff <- combn(case, 2, function(x) diff(x)) 
+    print(c(diff, paste0('id: ', vk_nr)))
     
     diff_vector <- c(diff_vector, diff)
 
@@ -77,6 +88,8 @@ for (k in unique(tasks)) {
     
     # Only the sign is random (for the bootstrap), so work with absolute values and randomly allocate a plus or a minus
     abs_diff <- abs(diff_vector)
+  
+    plot(abs_diff)
   
     # qqnorm(diff)
     # qqnorm(abs_diff)
@@ -94,7 +107,7 @@ for (k in unique(tasks)) {
     diff_numb <- NA
     CIs2 <- data.frame(NA,NA)
     set.seed(123)
-    for (z in 1:1e2){
+    for (z in 1:1e3){
       sign <- rbinom(length(abs_diff),1,0.5)*2-1 # binomial distribution with 50% 0 and 50% 1: factor 2 and plus 1 to transform to -1 and 1
       sign_diff <-sign*abs_diff
       sd_diff[z] <- sd(sign_diff)
@@ -136,7 +149,7 @@ for (k in unique(tasks)) {
     CIs2_tricia <- data.frame(NA, NA)
     cols <- mapping[k][[1]]
     set.seed(123)
-    for (z in 1:1e2){
+    for (z in 1:1e3){
       tricia_sample_selection <- tricia_data[tricia_data[cols[2]] != 0, ]
       tricia_sample <- tricia_sample_selection[sample(nrow(tricia_sample_selection), length(abs_diff)), ]
       sign_diff_df <- tricia_sample[cols[1]] - tricia_sample[cols[2]]
@@ -172,42 +185,59 @@ for (k in unique(tasks)) {
     
     df <- rbind(df_sme, df_tricia)
     
-    ggplot(df, aes(x = results, fill = group)) +
-      geom_histogram(position = "dodge", alpha = 0.5, bins = 10) +
-      labs(title = "Histogram", x = "Values", y = "Frequency") +
-      scale_fill_manual(values = c("blue", "red"))
     
-    # Create density plot
-    p <- ggplot(df, aes(x = results, fill = group)) +
-      geom_density(alpha = 0.8, color = "black") +
-      labs(title = paste0("Density Plot ", cols[1]), x = "Values", y = "Density") +
-      scale_fill_manual(values = c("blue", "red")) + 
-      scale_x_continuous(breaks = sort(unique(diff_numb_tricia))) +
-      geom_vline(xintercept = CIlower2, color = "blue", linetype = "dashed", linewidth = 1.5) +
-      geom_vline(xintercept = CIupper2, color = "blue", linetype = "dashed", linewidth = 1.5) +
-      geom_vline(xintercept = CIlower2_tricia, color = "red", linetype = "dashed", linewidth = 1.5) +
-      geom_vline(xintercept = CIupper2_tricia, color = "red", linetype = "dashed", linewidth = 1.5)
-      
-    png(paste0("./plots/density_plot_", cols[1], ".png"))
-    print(p)
-    dev.off()
+    ggplot(df, aes(x = results, fill = group)) +
+      geom_histogram(position = "dodge", alpha = 0.6, binwidth = 1) +
+      labs(title = paste0("Histogram  ", cols[1]), x = "Values", y = "Density") +
+      scale_fill_manual(values = c('SME' = "grey", 'TRICIA' = "black")) +
+      theme_minimal() +
+      scale_x_continuous(breaks = sort(unique(c(diff_numb_tricia, diff_numb, -1*diff_numb_tricia, -1*diff_numb))))
+
+    ggsave(paste0("./plots/Histogram", cols[1], ".jpeg"), device = "jpeg", plot = last_plot(), dpi = 300)
+
+
+    # # Create density plot
+    # p <- ggplot(df, aes(x = results, fill = group)) +
+    #   geom_density(alpha = 0.8, color = "black") +
+    #   labs(title = paste0("Density Plot ", cols[1]), x = "Values", y = "Density") +
+    #   scale_fill_manual(values = c("grey", "black")) + 
+    #   scale_x_continuous(breaks = sort(unique(diff_numb_tricia))) +
+    #   geom_vline(xintercept = CIlower2, color = "grey", linetype = "dashed", linewidth = 1.5) +
+    #   geom_vline(xintercept = CIupper2, color = "grey", linetype = "dashed", linewidth = 1.5) +
+    #   geom_vline(xintercept = CIlower2_tricia, color = "black", linetype = "dashed", linewidth = 1.5) +
+    #   geom_vline(xintercept = CIupper2_tricia, color = "black", linetype = "dashed", linewidth = 1.5)
+    #   
+    # png(paste0("./plots/density_plot_", cols[1], ".png"))
+    # print(p)
+    # dev.off()
     # Save the density plot as a PNG file
     # ggsave(paste0("density_plot", cols[1], ".png"), plot = last_plot())
     
   # Create density plot
     max_CI <- ceiling(max(abs(CIlower2), abs(CIlower2_tricia), abs(CIupper2), abs(CIupper2_tricia))) 
-      
-    ggplot(df, aes(x = results, fill = group)) +
-      geom_density(alpha = 0.4, color = "black") + 
-      labs(title = paste0("Density Plot ", cols[1]), x = "Values", y = "Density") +
-      scale_fill_manual(values = c("blue", "red")) + 
-      xlim(-max_CI, max_CI) +
-      geom_vline(xintercept = CIlower2, color = "blue", linetype = "dashed", linewidth = 1.5) +
-      geom_vline(xintercept = CIupper2, color = "blue", linetype = "dashed", linewidth = 1.5) +
-      geom_vline(xintercept = CIlower2_tricia, color = "red", linetype = "dashed", linewidth = 1.5) +
-      geom_vline(xintercept = CIupper2_tricia, color = "red", linetype = "dashed", linewidth = 1.5)
     
-    ggsave(paste0("./plots/CI_plot", cols[1], ".png"), device = "png", plot = last_plot(), dpi = 300)
+    ggplot(df, aes(x = results, fill = group)) +
+      # geom_histogram(position = "dodge", alpha = 0.2, binwidth = 2) +
+      xlim(-max_CI, max_CI) +
+      labs(title = paste0("CI Plot ", cols[1]), x = "Values", y = "Density") +
+      # scale_fill_manual(values = c('SME' = "grey", 'TRICIA' = "black")) +
+      theme_minimal() +
+      geom_vline(xintercept = CIlower2, color = "grey", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIupper2, color = "grey", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIlower2_tricia, color = "black", linetype = "dashed", linewidth = 1.5) +
+      geom_vline(xintercept = CIupper2_tricia, color = "black", linetype = "dashed", linewidth = 1.5)
+      
+    # ggplot(df, aes(x = results, fill = group)) +
+    #   geom_density(alpha = 0.4, color = "black") + 
+    #   labs(title = paste0("Density Plot ", cols[1]), x = "Values", y = "Density") +
+    #   scale_fill_manual(values = c("grey", "black")) + 
+    #   xlim(-max_CI, max_CI) +
+    #   geom_vline(xintercept = CIlower2, color = "grey", linetype = "dashed", linewidth = 1.5) +
+    #   geom_vline(xintercept = CIupper2, color = "grey", linetype = "dashed", linewidth = 1.5) +
+    #   geom_vline(xintercept = CIlower2_tricia, color = "black", linetype = "dashed", linewidth = 1.5) +
+    #   geom_vline(xintercept = CIupper2_tricia, color = "black", linetype = "dashed", linewidth = 1.5)
+    # 
+    ggsave(paste0("./plots/CI_", cols[1], ".jpeg"), device = "jpeg", plot = last_plot(), dpi = 300)
     
     # calculate sd based on mean_diff and multipy with sqrt(n)
     sd_diff_boot_tricia <- sd(mean_diff_tricia)*sqrt(length(abs_diff))
@@ -220,28 +250,4 @@ for (k in unique(tasks)) {
     # qqnorm(mean_diff)
     sd(mean_diff_tricia)
     mean_diff_boot_tricia # must be close to zero!
-    
-    
-    
-    # ############################################################################################
-    # # The within standard deviation approach! do not forget to define Testperson as factor!   #
-    # ###########################################################################################
-    # 
-    # data_anova <- data_tot[!is.na(data_tot[[k]]), ]
-    # 
-    # summary(fit <- lm (data_anvoa[[k]] ~ Testperson, data = data_anova))
-    # anova(fit)
-    # 
-    # sd_within <- sqrt(anova(fit)["Residuals", "Mean Sq"])
-    # sd_within*sqrt(2) # is close to sd
-    # 
-    # # simulate data sets to calculate differencies
-    # set.seed(123)
-    # diffs <- rnorm(1e5,0,sd_within)-rnorm(1e5,0,sd_within)
-    # mean_diff <- mean(diffs)
-    # sd <- sd(diffs)  # is equivalent to the sd_within*sqrt(2)
-    # 
-    # qqnorm(diffs)
-    # qqline(diffs)
-    
 }
