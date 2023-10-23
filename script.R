@@ -15,7 +15,8 @@ remove(list=ls())
 
 library(readxl)
 library(dplyr)
-library(tidyverse)
+library(ggplot2)
+# library(tidyverse)
 
 numeric_cols <- c("S", "D", "P", "RBC")
 mapping <- list(
@@ -51,16 +52,16 @@ alpha_pblack <- 0.05
 alpha_conf  <- 0.1
 
 # number of future n number of within series differencies
-n_test <- 5
+n_test <- 10
 
 tasks <- c("S", "D", "P", "RBC")
 
 # Estimation of standard deviation using bootstrap
 
-## To test the script
+## To test the script assign the i
 # i <- 63793
-k <- "RBC"
-# k <- "D"
+# k <- "RBC"
+# k <- "P"
 
 for (k in unique(tasks)) {
   
@@ -69,7 +70,7 @@ for (k in unique(tasks)) {
   # Loop over VK_IDs to get cases
   for (i in na.omit(unique(data_tot$VK_ID))) {
   
-    id <- na.omit(data_tot[data_tot$VK_ID == i, ])
+    id <- na.omit(data_tot[data_tot$VK_ID == i, c(k, "VK_ID")])
     
     case <- id %>% pull(k) %>% as.numeric()
     vk_nr <- (id %>% pull('VK_ID') %>% as.numeric())[1]
